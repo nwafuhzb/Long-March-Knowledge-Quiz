@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import worker from './src/worker.mjs';
+import worker, { redrawPendingContest } from './src/worker.mjs';
 
 export function database(path = ':memory:') {
   const sqlite = new DatabaseSync(path);
@@ -30,7 +30,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }), env);
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
-  }).listen(port, lan ? '0.0.0.0' : '127.0.0.1', () => {
+  }).listen(port, lan ? '0.0.0.0' : '127.0.0.1', async () => {
+    await redrawPendingContest(env.DB);
     console.log('主持口令 ' + env.QUIZ_SECRET);
     console.log('本机主持台 http://127.0.0.1:' + port + '/host');
     if (lan) {

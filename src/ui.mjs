@@ -4,6 +4,7 @@ export const page = `<!doctype html>
 <header><span class="mark" aria-hidden="true">★</span><div><h1>长征知识竞赛</h1><span id="role-label"></span></div><span id="connection" role="status"></span></header>
 <section id="login" class="panel" hidden><h2>主持人入口</h2><form id="login-form"><label for="password">主持口令</label><input id="password" type="password" required autocomplete="current-password"><button>进入比赛</button></form></section>
 <p id="message" role="status"></p>
+<section id="setup" class="panel" hidden></section>
 <div id="contest" hidden><section id="stage" class="panel"></section><section id="controls"></section><section id="scores" aria-label="四队积分"></section><details id="sharing" hidden><summary>投屏与队伍入口</summary><div id="links"></div></details></div>
 </main></body></html>`;
 
@@ -18,6 +19,7 @@ h2{font-size:clamp(22px,3.4vw,50px);line-height:1.45;margin:14px 0 22px;overflow
 #controls:not(:empty),#scores,details{margin-top:16px}.row,form{display:flex;flex-wrap:wrap;align-items:center;gap:10px}form{margin-top:12px}button,input,select,a.link{font:inherit;border-radius:9px;padding:10px 14px;min-height:44px}button,a.link{color:#261314;background:var(--gold);border:1px solid transparent;font-weight:700;cursor:pointer;text-decoration:none}button.secondary{background:#512929;color:var(--ink);border-color:var(--line)}button:disabled{opacity:.45;cursor:default}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #fff0d4;outline-offset:2px}input,select{background:#291616;color:var(--ink);border:1px solid var(--line);max-width:100%}input[type=number]{width:90px}.blank{width:min(180px,100%)}
 #scores{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.score{min-width:0;background:#391b1bef;border:1px solid var(--line);border-radius:12px;padding:12px}.score div{display:flex;justify-content:space-between;gap:4px}.score strong{color:var(--gold);font-size:1.2em}progress{width:100%;height:10px;accent-color:var(--gold)}summary{cursor:pointer;color:var(--gold);padding:10px 0}#links{display:flex;gap:10px;flex-wrap:wrap}.team{text-align:center}.team h2{margin:12px auto}.team .timer{margin:14px 0}.buzz{width:min(100%,340px);min-height:100px;border-radius:24px;margin:16px auto 0;font-size:32px}.buzz:enabled{box-shadow:0 0 28px #efb96555}.screen #stage{min-height:44vh}
 @media(max-width:600px){.options,#scores{grid-template-columns:repeat(2,minmax(0,1fr))}.option{padding:8px}.shell{width:92%}}
+#setup{max-width:850px;margin:auto}#setup h2{margin-top:0}#draw-form{display:grid;grid-template-columns:1fr 150px;gap:18px}#draw-form input{width:100%}#count-summary,#draw-form button{grid-column:1/-1}#draw-form button{margin-top:10px}#count-summary{color:var(--gold)}@media(max-width:480px){#draw-form{grid-template-columns:1fr}#draw-form input{margin-top:-10px}}
 `;
 
 function startClient() {
@@ -49,6 +51,26 @@ function startClient() {
   function render() {
     const { current, total, phase, winner, question, correct, answer, seconds, started, revealed, scores, finished } = state;
     $('login').hidden = true;
+    const setup = host && !state.prepared;
+    if (host) {
+      const path = setup ? '/setup' : '/host';
+      if (location.pathname !== path) history.replaceState(null, '', path);
+      $('role-label').textContent = setup ? '赛前设置' : '主持台';
+    }
+    $('setup').hidden = !setup;
+    if (setup) {
+      $('contest').hidden = true;
+      const fields = Object.entries(kinds).map(([type, label]) => '<label for="count-' + type + '">' + label +
+        '（最多 ' + state.questionLimits[type] + ' 道）</label><input id="count-' + type +
+        '" type="number" min="0" max="' + state.questionLimits[type] + '" required value="' + state.questionCounts[type] + '">').join('');
+      $('setup').innerHTML = '<h2>赛前设置</h2><p>题库共 ' + state.bankTotal + ' 道，每题 2.5 分，积分条满格为 100 分。</p>' +
+        '<form id="draw-form"><label for="seconds">每题读题时间（秒）</label><input id="seconds" type="number" min="1" max="120" required value="' + seconds + '">' +
+        '<label for="count-total">比赛总题数</label><input id="count-total" type="number" min="1" max="' + state.bankTotal +
+        '" required value="' + total + '">' + fields + '<output id="count-summary"></output><button>开始比赛</button></form>';
+      updateCounts();
+      return;
+    }
+    $('setup').replaceChildren();
     $('contest').hidden = false;
     const status = winner === null ? labels[phase] : scores[winner].name + '抢答成功' + (correct === null ? '' : correct ? ' · 答对 +2.5 分' : ' · 答错');
     const timer = '<span class="timer" id="timer">—</span>';
@@ -61,16 +83,18 @@ function startClient() {
       $('stage').innerHTML = '<div class="top"><div class="meta">' + round + ' · ' + kinds[question.type] + '<br>' + escape(finished ? '比赛结束 · ' + status : status) + '</div>' + timer +
         '</div><h2>' + escape(question.prompt).replace(/_+/g, '＿＿＿') + '</h2><div class="options">' +
         options(question, (text, letter) => '<div class="option"><b>' + letter + '</b>' + text + '</div>') + '</div>' +
-        (revealed ? '<div class="answer">正确答案　' + escape(answer) + '</div>' : '');
+        (revealed ? '<div class="answer">正确答案　' + escape(answer) +
+          (state.answerNote ? '<p>题库注释　' + escape(state.answerNote) + '</p>' : '') + '</div>' : '');
     }
     if (host) {
       const active = ['countdown', 'open', 'won'].includes(phase);
       let controls = '<div class="row">' + button('prev', '上一题', current === 0 || active) + button('next', '下一题', current + 1 === total || active) +
         button('start', '开始倒计时', phase !== 'ready') + button('reveal', '显示正确答案', revealed || !['open', 'closed'].includes(phase)) + '</div>';
-      if (!started) controls += '<form id="settings"><label for="seconds">每题读题时间（秒）</label><input id="seconds" type="number" value="' + seconds + '" min="1" max="120" required><button>保存</button></form>';
       if (phase === 'won') {
         const fields = question.type === 'fill'
-          ? Array.from({ length: question.blanks }, (_, i) => '<input class="blank" aria-label="第 ' + (i + 1) + ' 空" placeholder="第 ' + (i + 1) + ' 空" maxlength="100" required>').join('')
+          ? Array.from({ length: question.blanks }, (_, i) =>
+            '<label for="blank-' + i + '">第 ' + (i + 1) + ' 空</label><input id="blank-' + i +
+            '" class="blank" autocomplete="off" maxlength="100" required>').join('')
           : '<select aria-label="队伍答案" required><option value="">选择队伍答案</option>' +
             options(question, (text, letter) => '<option value="' + letter + '">' + letter + '　' + text + '</option>') + '</select>';
         controls += '<form id="answer-form">' + fields + '<button>提交并判分</button></form>';
@@ -97,7 +121,19 @@ function startClient() {
     if (!team) $('scores').innerHTML = scores.map(({name, score}) => '<div class="score"><div><span>' + escape(name) +
       '</span><strong>' + score + '</strong></div><progress aria-label="' + escape(name) + '积分" max="100" value="' + score + '"></progress></div>').join('');
     tick();
+    updateCounts();
   }
+
+  function updateCounts() {
+    const form = $('draw-form');
+    if (!form) return;
+    const totalInput = $('count-total');
+    const sum = Object.keys(kinds).reduce((total, type) => total + Number($('count-' + type).value), 0);
+    totalInput.setCustomValidity(sum === Number(totalInput.value) ? '' : '各板块题数之和必须等于比赛总题数');
+    $('count-summary').textContent = '板块合计 ' + sum + ' / 总题数 ' + totalInput.value;
+  }
+
+  $('setup').addEventListener('input', updateCounts);
 
   async function request(action) {
     if (!credential) return;
@@ -112,7 +148,7 @@ function startClient() {
       const data = await response.json();
       if (version !== sequence) return;
       if (host && response.status === 401) {
-        sessionStorage.removeItem('host-secret'); credential = ''; $('login').hidden = false; $('contest').hidden = true;
+        sessionStorage.removeItem('host-secret'); credential = ''; $('login').hidden = false; $('contest').hidden = true; $('setup').hidden = true;
       }
       if (!response.ok) throw new Error(data.error);
       offset = data.now - (Date.now() + before) / 2;
@@ -152,9 +188,13 @@ function startClient() {
     if (action === 'prev' || action === 'next') act({ action: 'navigate', direction: action === 'prev' ? -1 : 1 });
     else act({ action });
   });
-  $('controls').addEventListener('submit', event => {
+  document.addEventListener('submit', event => {
+    if (!['draw-form', 'answer-form'].includes(event.target.id)) return;
     event.preventDefault();
-    if (event.target.id === 'settings') act({ action: 'settings', seconds: Number($('seconds').value) });
+    if (event.target.id === 'draw-form') {
+      const counts = Object.fromEntries(Object.keys(kinds).map(type => [type, Number($('count-' + type).value)]));
+      act({ action: 'begin', counts, total: Number($('count-total').value), seconds: Number($('seconds').value) });
+    }
     else if (event.target.id === 'answer-form') {
       const select = event.target.querySelector('select');
       const answer = select ? select.value : Array.from(event.target.querySelectorAll('input'), input => input.value.trim());
@@ -176,3 +216,4 @@ function startClient() {
 }
 
 export const client = '(' + startClient.toString() + ')();';
+
